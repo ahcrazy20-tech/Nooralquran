@@ -1,0 +1,58 @@
+name: Noor Quran - Decompile and Build
+on: workflow_dispatch
+
+jobs:
+  all:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+
+      - name: Find APK
+        run: |
+          APK=$(ls app/*.apk | head -1)
+          echo "APK=$APK" >> $GITHUB_ENV
+          echo "Using $APK"
+
+      - name: Download jadx and apktool
+        run: |
+          wget -q https://github.com/skylot/jadx/releases/download/v1.5.0/jadx-1.5.0.zip
+          unzip -q jadx-1.5.0.zip -d jadx
+          wget -q https://github.com/iBotPeaches/Apktool/releases/download/v2.9.3/apktool_2.9.3.jar -O apktool.jar
+          echo "$ANDROID_HOME/build-tools/$(ls $ANDROID_HOME/build-tools | sort -V | tail -1)" >> $GITHUB_PATH
+
+      - name: Decompile to source (jadx)
+        run: ./jadx/bin/jadx -d out/jadx --export-gradle --show-bad-code "$APK" || true
+
+      - name: Decode with apktool (smali + resources)
+        run: java -jar apktool.jar d "$APK" -o out/apktool -f
+
+      - name: Rebuild APK
+        run: |
+          cp -r out/apktool work
+          java -jar apktool.jar b work -o unsigned.apk
+          zipalign -f -p 4 unsigned.apk aligned.apk
+
+      - name: Sign APK
+        env:
+          KS_B64: ${{ secrets.KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > release.jks
+            apksigner sign --ks release.jks --ks-key-alias "$KS_ALIAS" --ks-pass pass:"$KS_PASS" --out NoorAlQuran-signed.apk aligned.apk
+          else
+            keytool -genkeypair -keystore debug.jks -alias debug -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Noor Debug"
+            apksigner sign --ks debug.jks --ks-key-alias debug --ks-pass pass:android --out NoorAlQuran-signed.apk aligned.apk
+          fi
+          apksigner verify -v NoorAlQuran-signed.apk
+
+      - uses: actions/upload-artifact@v4
+        with: { name: 1-NoorAlQuran-signed-apk, path: NoorAlQuran-signed.apk }
+      - uses: actions/upload-artifact@v4
+        with: { name: 2-jadx-source, path: out/jadx }
+      - uses: actions/upload-artifact@v4
+        with: { name: 3-apktool-smali, path: out/apktool }
