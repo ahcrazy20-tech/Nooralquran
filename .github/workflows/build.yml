@@ -12,7 +12,12 @@ jobs:
 
       - name: Find APK
         run: |
-          APK=$(ls app/*.apk | head -1)
+          echo "Files in repo:"; find . -path ./.git -prune -o -type f -print | head -50
+          APK=$(find . -path ./.git -prune -o -type f \( -iname '*.apk' -o -iname '*.apk.zip' \) -print | head -1)
+          if [ -z "$APK" ]; then
+            echo "::error::لا يوجد ملف APK في الـ repo. ارفع الملف (امتداده .apk) في مجلد app"
+            exit 1
+          fi
           echo "APK=$APK" >> $GITHUB_ENV
           echo "Using $APK"
 
